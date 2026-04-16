@@ -1,0 +1,26 @@
+# ── Option A: Full-stack on Render (backend serves built frontend) ──────────
+# Use this if you're NOT deploying the frontend separately on Vercel.
+services:
+  - type: web
+    name: upconnects
+    runtime: node
+    buildCommand: npm run build        # builds client/dist, then server starts
+    startCommand: npm start            # node server/index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NOTION_TOKEN
+        sync: false
+      - key: NOTION_DATABASE_ID
+        sync: false
+      - key: GAME_CODE
+        sync: false
+      - key: ADMIN_CODE
+        sync: false
+
+# ── Option B: Backend only on Render (frontend deployed on Vercel) ──────────
+# Create a separate Render web service with:
+#   Build command : cd server && npm install
+#   Start command : node server/index.js
+# Then on Vercel set env var:
+#   VITE_SOCKET_URL = https://<your-render-service>.onrender.com

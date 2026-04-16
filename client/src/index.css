@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root {
+    @apply h-full;
+  }
+  body {
+    @apply bg-upstox-dark text-white antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+  * {
+    box-sizing: border-box;
+  }
+}
+
+@layer utilities {
+  .option-btn {
+    @apply relative w-full py-5 px-6 rounded-2xl text-left font-bold text-lg text-white
+           transition-all duration-150 active:scale-95 select-none
+           flex items-center gap-4 shadow-lg;
+  }
+  .option-label {
+    @apply w-9 h-9 rounded-xl flex items-center justify-center font-black text-base shrink-0;
+    background: rgba(255,255,255,0.2);
+  }
+}
