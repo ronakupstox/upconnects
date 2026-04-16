@@ -1,17 +1,18 @@
-import { useEffect, useReducer, useCallback, useState } from 'react';
+import { useEffect, useReducer, useCallback, useState, useRef } from 'react';
 import { socket } from '../socket';
 import Logo from '../components/Logo';
 
-const OPTION_COLORS = { A: '#C0392B', B: '#1A56C4', C: '#B7770D', D: '#1A7A1A' };
-
+// ── Reducer ───────────────────────────────────────────────────────────────────
 const initialState = {
-  status: 'lobby', // lobby | starting | question-active | question-closed | all-done | leaderboard-shown | answers-revealed
+  status: 'lobby', // lobby | starting | game-running | all-done | leaderboard-shown | answers-revealed
   players: [],
   questionsCount: 0,
-  currentQuestion: null,
-  answered: 0,
-  total: 0,
-  isLast: false,
+  // Game-running state
+  totalDuration: 0,
+  currentQIndex: 0,
+  totalQuestions: 0,
+  liveLeaderboard: [],
+  // misc
   toast: null,
   loading: false,
 };
@@ -19,21 +20,37 @@ const initialState = {
 function reducer(state, action) {
   switch (action.type) {
     case 'AUTHENTICATED':
-      return { ...state, players: action.players, status: action.status === 'lobby' ? 'lobby' : state.status, questionsCount: action.questionsCount };
+      return {
+        ...state,
+        players: action.players,
+        status: action.status === 'lobby' ? 'lobby' : state.status,
+        questionsCount: action.questionsCount,
+      };
     case 'PLAYER_UPDATE':
       return { ...state, players: action.players };
     case 'QUESTIONS_LOADED':
-      return { ...state, questionsCount: action.count, toast: `${action.count} questions loaded from Notion` };
+      return { ...state, questionsCount: action.count, toast: `✅ ${action.count} questions loaded` };
     case 'GAME_STARTED':
       return { ...state, status: 'starting' };
-    case 'QUESTION_STARTED':
-      return { ...state, status: 'question-active', currentQuestion: action.question, answered: 0, total: action.total, isLast: action.isLast };
-    case 'ANSWER_PROGRESS':
-      return { ...state, answered: action.answered, total: action.total };
-    case 'QUESTION_CLOSED':
-      return { ...state, status: 'question-closed', answered: action.answered, total: action.total, isLast: action.isLast };
+    case 'GAME_INFO':
+      return {
+        ...state,
+        status: 'game-running',
+        totalDuration: action.totalDuration,
+        totalQuestions: action.questionsCount,
+        currentQIndex: 0,
+        liveLeaderboard: [],
+      };
+    case 'QUESTION_TICK':
+      return { ...state, currentQIndex: action.questionIndex };
+    case 'LIVE_LEADERBOARD':
+      return { ...state, liveLeaderboard: action.leaderboard };
     case 'GAME_ENDED':
-      return { ...state, status: 'all-done' };
+      return {
+        ...state,
+        status: 'all-done',
+        liveLeaderboard: action.leaderboard ?? state.liveLeaderboard,
+      };
     case 'LEADERBOARD_SHOWN':
       return { ...state, status: 'leaderboard-shown' };
     case 'ANSWERS_REVEALED':
@@ -51,100 +68,77 @@ function reducer(state, action) {
   }
 }
 
+// ── Main Component ────────────────────────────────────────────────────────────
 export default function AdminPage({ initData }) {
   const [state, dispatch] = useReducer(reducer, {
     ...initialState,
-    // Seed with the payload from admin:authenticated so we don't start empty
     players: initData?.players ?? [],
     questionsCount: initData?.questionsCount ?? 0,
   });
   const [duration, setDuration] = useState(30);
 
-  const showToast = useCallback((message) => {
-    dispatch({ type: 'TOAST', message });
+  const showToast = useCallback((msg) => {
+    dispatch({ type: 'TOAST', message: msg });
     setTimeout(() => dispatch({ type: 'CLEAR_TOAST' }), 3500);
   }, []);
 
   useEffect(() => {
-    socket.on('admin:authenticated', ({ players, status, questionsCount }) => {
-      dispatch({ type: 'AUTHENTICATED', players, status, questionsCount });
-    });
-    socket.on('admin:player-update', ({ players }) => {
-      dispatch({ type: 'PLAYER_UPDATE', players });
-    });
+    socket.on('admin:authenticated', ({ players, status, questionsCount }) =>
+      dispatch({ type: 'AUTHENTICATED', players, status, questionsCount })
+    );
+    socket.on('admin:player-update', ({ players }) =>
+      dispatch({ type: 'PLAYER_UPDATE', players })
+    );
     socket.on('admin:questions-loaded', ({ count }) => {
       dispatch({ type: 'QUESTIONS_LOADED', count });
       dispatch({ type: 'SET_LOADING', value: false });
     });
-    socket.on('admin:question-started', ({ index, total, question, options, duration, isLast }) => {
-      dispatch({ type: 'QUESTION_STARTED', question: { index, total, question, options, duration }, total, isLast: isLast || false });
-    });
-    socket.on('admin:answer-progress', ({ answered, total }) => {
-      dispatch({ type: 'ANSWER_PROGRESS', answered, total });
-    });
-    socket.on('admin:question-closed', ({ answered, total, isLast }) => {
-      dispatch({ type: 'QUESTION_CLOSED', answered, total, isLast });
-    });
-    socket.on('admin:game-ended', () => {
-      dispatch({ type: 'GAME_ENDED' });
-    });
-    socket.on('game:leaderboard', () => {
-      dispatch({ type: 'LEADERBOARD_SHOWN' });
-    });
-    socket.on('game:answers-revealed', () => {
-      dispatch({ type: 'ANSWERS_REVEALED' });
-    });
-    socket.on('game:reset', () => {
-      dispatch({ type: 'RESET' });
-    });
+    socket.on('game:started', () => dispatch({ type: 'GAME_STARTED' }));
+    socket.on('admin:game-info', ({ totalDuration, questionsCount }) =>
+      dispatch({ type: 'GAME_INFO', totalDuration, questionsCount })
+    );
+    socket.on('admin:question-tick', ({ questionIndex }) =>
+      dispatch({ type: 'QUESTION_TICK', questionIndex })
+    );
+    socket.on('admin:live-leaderboard', ({ leaderboard }) =>
+      dispatch({ type: 'LIVE_LEADERBOARD', leaderboard })
+    );
+    socket.on('admin:game-ended', ({ leaderboard }) =>
+      dispatch({ type: 'GAME_ENDED', leaderboard })
+    );
+    socket.on('game:leaderboard', () => dispatch({ type: 'LEADERBOARD_SHOWN' }));
+    socket.on('game:answers-revealed', () => dispatch({ type: 'ANSWERS_REVEALED' }));
+    socket.on('game:reset', () => dispatch({ type: 'RESET' }));
     socket.on('error', ({ message }) => {
-      showToast(`Error: ${message}`);
+      showToast(`⚠️ ${message}`);
       dispatch({ type: 'SET_LOADING', value: false });
     });
 
     return () => {
-      socket.off('admin:authenticated');
-      socket.off('admin:player-update');
-      socket.off('admin:questions-loaded');
-      socket.off('admin:question-started');
-      socket.off('admin:answer-progress');
-      socket.off('admin:question-closed');
-      socket.off('admin:game-ended');
-      socket.off('game:leaderboard');
-      socket.off('game:answers-revealed');
-      socket.off('game:reset');
-      socket.off('error');
+      [
+        'admin:authenticated', 'admin:player-update', 'admin:questions-loaded',
+        'game:started', 'admin:game-info', 'admin:question-tick',
+        'admin:live-leaderboard', 'admin:game-ended',
+        'game:leaderboard', 'game:answers-revealed', 'game:reset', 'error',
+      ].forEach((e) => socket.off(e));
     };
   }, [showToast]);
 
-  const emit = (event, data) => socket.emit(event, data);
+  const emit = (e, d) => socket.emit(e, d);
 
-  const handleRefreshQuestions = () => {
-    dispatch({ type: 'SET_LOADING', value: true });
-    emit('admin:refresh-questions');
-  };
-
-  const handleStartGame = () => {
-    dispatch({ type: 'SET_LOADING', value: true });
-    emit('admin:start-game', { duration });
-    setTimeout(() => dispatch({ type: 'SET_LOADING', value: false }), 3000);
-  };
-
-  const handleCloseQuestion = () => emit('admin:close-question');
-  const handleNextQuestion = () => emit('admin:next-question');
-  const handleShowLeaderboard = () => emit('admin:show-leaderboard');
-  const handleRevealAnswers = () => emit('admin:reveal-answers');
   const handleReset = () => {
     if (window.confirm('Reset the game? All scores and answers will be cleared.')) {
       emit('admin:reset-game');
     }
   };
 
-  const { status, players, questionsCount, currentQuestion, answered, total, isLast, toast, loading } = state;
+  const {
+    status, players, questionsCount, totalDuration, currentQIndex,
+    totalQuestions, liveLeaderboard, toast, loading,
+  } = state;
 
   return (
     <div className="min-h-screen bg-upstox-dark text-white">
-      {/* Toast */}
       {toast && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-upstox-card border border-upstox-purple/40 text-white text-sm px-5 py-3 rounded-full shadow-xl animate-pop-in whitespace-nowrap">
           {toast}
@@ -157,18 +151,21 @@ export default function AdminPage({ initData }) {
           <Logo size="sm" />
           <div className="flex items-center gap-3">
             <StatusBadge status={status} />
-            <button
-              onClick={handleReset}
-              className="text-xs text-upstox-muted hover:text-red-400 transition-colors px-3 py-1.5 rounded-xl hover:bg-red-400/10"
-            >
-              Reset
-            </button>
+            {status !== 'game-running' && (
+              <button
+                onClick={handleReset}
+                className="text-xs text-upstox-muted hover:text-red-400 transition-colors px-3 py-1.5 rounded-xl hover:bg-red-400/10"
+              >
+                Reset
+              </button>
+            )}
           </div>
         </div>
 
-        {/* ── LOBBY ──────────────────────────────────────────────────── */}
+        {/* ── LOBBY ─────────────────────────────────────────────────────── */}
         {(status === 'lobby' || status === 'starting') && (
           <div className="space-y-5">
+            {/* Players */}
             <div className="bg-upstox-card rounded-3xl p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-bold">Players in Lobby</h2>
@@ -194,41 +191,36 @@ export default function AdminPage({ initData }) {
               )}
             </div>
 
+            {/* Questions */}
             <div className="bg-upstox-card rounded-3xl p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-bold">Questions</h2>
                 {questionsCount > 0 && (
-                  <span className="text-green-400 text-sm font-semibold">{questionsCount} loaded</span>
+                  <span className="text-green-400 text-sm font-semibold">{questionsCount} loaded ✓</span>
                 )}
               </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={handleRefreshQuestions}
-                  disabled={loading}
-                  className="flex-1 py-3 rounded-2xl bg-upstox-navy text-white font-semibold text-sm transition-all active:scale-95 disabled:opacity-50"
-                >
-                  {loading ? 'Loading…' : '↻ Load from Notion'}
-                </button>
-              </div>
+              <button
+                onClick={() => { dispatch({ type: 'SET_LOADING', value: true }); emit('admin:refresh-questions'); }}
+                disabled={loading}
+                className="w-full py-3 rounded-2xl bg-upstox-navy text-white font-semibold text-sm transition-all active:scale-95 disabled:opacity-50"
+              >
+                {loading ? 'Loading…' : '↻  Load from Notion'}
+              </button>
             </div>
 
-            {/* Duration control */}
+            {/* Duration */}
             <div className="bg-upstox-card rounded-3xl p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-bold">Time per Question</h2>
                 <span className="text-3xl font-black text-upstox-purple">{duration}s</span>
               </div>
               <input
-                type="range"
-                min={10}
-                max={120}
-                step={5}
-                value={duration}
+                type="range" min={10} max={120} step={5} value={duration}
                 onChange={(e) => setDuration(Number(e.target.value))}
                 className="w-full h-2 rounded-full appearance-none cursor-pointer"
                 style={{ accentColor: '#6C3EFF' }}
               />
-              <div className="flex justify-between text-xs text-upstox-muted mt-2">
+              <div className="flex justify-between items-center text-xs text-upstox-muted mt-3">
                 <span>10s</span>
                 <div className="flex gap-2">
                   {[15, 20, 30, 45, 60].map((s) => (
@@ -236,9 +228,7 @@ export default function AdminPage({ initData }) {
                       key={s}
                       onClick={() => setDuration(s)}
                       className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
-                        duration === s
-                          ? 'bg-upstox-purple text-white'
-                          : 'bg-upstox-navy text-upstox-muted hover:text-white'
+                        duration === s ? 'bg-upstox-purple text-white' : 'bg-upstox-navy text-upstox-muted hover:text-white'
                       }`}
                     >
                       {s}s
@@ -250,7 +240,11 @@ export default function AdminPage({ initData }) {
             </div>
 
             <button
-              onClick={handleStartGame}
+              onClick={() => {
+                dispatch({ type: 'SET_LOADING', value: true });
+                emit('admin:start-game', { duration });
+                setTimeout(() => dispatch({ type: 'SET_LOADING', value: false }), 3000);
+              }}
               disabled={loading || status === 'starting'}
               className="w-full py-5 rounded-3xl font-black text-xl text-white transition-all active:scale-[0.98] disabled:opacity-50 shadow-lg shadow-upstox-purple/30"
               style={{ background: 'linear-gradient(135deg, #6C3EFF 0%, #4B1FCC 100%)' }}
@@ -260,60 +254,55 @@ export default function AdminPage({ initData }) {
           </div>
         )}
 
-        {/* ── ACTIVE QUESTION ─────────────────────────────────────────── */}
-        {(status === 'question-active' || status === 'question-closed') && currentQuestion && (
-          <div className="space-y-5">
-            <QuestionPreview question={currentQuestion} answered={answered} total={total} />
-
-            {status === 'question-active' && (
-              <button
-                onClick={handleCloseQuestion}
-                className="w-full py-4 rounded-2xl bg-upstox-card border border-upstox-muted/30 text-upstox-muted hover:text-white hover:border-white/30 font-semibold transition-all active:scale-95"
-              >
-                ⏹  End Question Early
-              </button>
-            )}
-
-            {status === 'question-closed' && (
-              <button
-                onClick={isLast ? handleShowLeaderboard : handleNextQuestion}
-                className="w-full py-5 rounded-3xl font-black text-xl text-white transition-all active:scale-[0.98] shadow-lg shadow-upstox-purple/30"
-                style={{ background: 'linear-gradient(135deg, #6C3EFF 0%, #4B1FCC 100%)' }}
-              >
-                {isLast ? '🏆  Show Leaderboard' : '→  Next Question'}
-              </button>
-            )}
-          </div>
+        {/* ── GAME RUNNING ──────────────────────────────────────────────── */}
+        {status === 'game-running' && (
+          <GameRunningView
+            totalDuration={totalDuration}
+            currentQIndex={currentQIndex}
+            totalQuestions={totalQuestions}
+            liveLeaderboard={liveLeaderboard}
+            onEndGame={() => {
+              if (window.confirm('End the game now? Current scores will be final.')) {
+                emit('admin:end-game');
+              }
+            }}
+          />
         )}
 
-        {/* ── ALL DONE (before leaderboard) ────────────────────────────── */}
+        {/* ── ALL DONE ──────────────────────────────────────────────────── */}
         {status === 'all-done' && (
-          <div className="text-center space-y-6">
-            <div className="bg-upstox-card rounded-3xl p-10">
-              <div className="text-6xl mb-4">🎉</div>
-              <h2 className="text-2xl font-black mb-2">All Questions Done!</h2>
-              <p className="text-upstox-muted">Ready to reveal the final standings?</p>
+          <div className="space-y-5">
+            <div className="bg-upstox-card rounded-3xl p-8 text-center">
+              <div className="text-5xl mb-3">🎉</div>
+              <h2 className="text-2xl font-black mb-1">Game Over!</h2>
+              <p className="text-upstox-muted text-sm">Players are waiting for the results.</p>
             </div>
+
+            {/* Final leaderboard preview */}
+            {liveLeaderboard.length > 0 && (
+              <LiveLeaderboard leaderboard={liveLeaderboard} title="Final Standings" />
+            )}
+
             <button
-              onClick={handleShowLeaderboard}
-              className="w-full py-5 rounded-3xl font-black text-xl text-white transition-all active:scale-[0.98] shadow-lg shadow-upstox-purple/30"
+              onClick={() => emit('admin:show-leaderboard')}
+              className="w-full py-5 rounded-3xl font-black text-xl text-white transition-all active:scale-[0.98] shadow-lg"
               style={{ background: 'linear-gradient(135deg, #FFD700 0%, #FFA500 100%)' }}
             >
-              🏆  Present Leaderboard
+              🏆  Present Leaderboard to Players
             </button>
           </div>
         )}
 
-        {/* ── LEADERBOARD SHOWN ──────────────────────────────────────── */}
+        {/* ── LEADERBOARD SHOWN ─────────────────────────────────────────── */}
         {status === 'leaderboard-shown' && (
-          <div className="text-center space-y-6">
-            <div className="bg-upstox-card rounded-3xl p-10">
-              <div className="text-6xl mb-4">🏆</div>
-              <h2 className="text-2xl font-black mb-2">Leaderboard is live!</h2>
-              <p className="text-upstox-muted">All players can see the final results.</p>
+          <div className="space-y-5">
+            <div className="bg-upstox-card rounded-3xl p-8 text-center">
+              <div className="text-5xl mb-3">🏆</div>
+              <h2 className="text-2xl font-black mb-1">Leaderboard is live!</h2>
+              <p className="text-upstox-muted text-sm">All players can see the final results.</p>
             </div>
             <button
-              onClick={handleRevealAnswers}
+              onClick={() => emit('admin:reveal-answers')}
               className="w-full py-5 rounded-3xl font-black text-xl text-white transition-all active:scale-[0.98] shadow-lg"
               style={{ background: 'linear-gradient(135deg, #22C55E 0%, #15803D 100%)' }}
             >
@@ -322,19 +311,19 @@ export default function AdminPage({ initData }) {
           </div>
         )}
 
-        {/* ── ANSWERS REVEALED ────────────────────────────────────────── */}
+        {/* ── ANSWERS REVEALED ──────────────────────────────────────────── */}
         {status === 'answers-revealed' && (
-          <div className="text-center space-y-6">
-            <div className="bg-upstox-card rounded-3xl p-10">
-              <div className="text-6xl mb-4">✅</div>
-              <h2 className="text-2xl font-black mb-2">Answers Revealed!</h2>
-              <p className="text-upstox-muted">Everyone can now browse the correct answers.</p>
+          <div className="space-y-5">
+            <div className="bg-upstox-card rounded-3xl p-8 text-center">
+              <div className="text-5xl mb-3">✅</div>
+              <h2 className="text-2xl font-black mb-1">Answers Revealed!</h2>
+              <p className="text-upstox-muted text-sm">Players can browse the correct answers.</p>
             </div>
             <button
               onClick={handleReset}
-              className="w-full py-5 rounded-3xl font-black text-xl text-white transition-all active:scale-[0.98] shadow-lg bg-upstox-card border-2 border-upstox-purple/40 hover:border-upstox-purple"
+              className="w-full py-5 rounded-3xl font-black text-xl text-white transition-all active:scale-[0.98] bg-upstox-card border-2 border-upstox-purple/40 hover:border-upstox-purple"
             >
-              🔄  Reset Game (Play Again)
+              🔄  Reset &amp; Play Again
             </button>
           </div>
         )}
@@ -343,71 +332,152 @@ export default function AdminPage({ initData }) {
   );
 }
 
+// ── Game Running View ─────────────────────────────────────────────────────────
+function GameRunningView({ totalDuration, currentQIndex, totalQuestions, liveLeaderboard, onEndGame }) {
+  const [secondsLeft, setSecondsLeft] = useState(totalDuration);
+  const intervalRef = useRef(null);
+
+  useEffect(() => {
+    setSecondsLeft(totalDuration);
+    intervalRef.current = setInterval(() => {
+      setSecondsLeft((s) => {
+        if (s <= 1) { clearInterval(intervalRef.current); return 0; }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(intervalRef.current);
+  }, [totalDuration]);
+
+  const pct = totalDuration > 0 ? (secondsLeft / totalDuration) * 100 : 0;
+  const mins = Math.floor(secondsLeft / 60);
+  const secs = secondsLeft % 60;
+  const timerColor = pct > 50 ? '#22C55E' : pct > 25 ? '#EAB308' : '#EF4444';
+
+  return (
+    <div className="space-y-5 animate-fade-up">
+      {/* Timer + question progress */}
+      <div className="bg-upstox-card rounded-3xl p-6">
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <p className="text-xs font-semibold text-upstox-muted uppercase tracking-wider mb-1">
+              Game in Progress
+            </p>
+            <p className="text-lg font-bold text-white">
+              Question {currentQIndex + 1}
+              <span className="text-upstox-muted font-normal"> / {totalQuestions}</span>
+            </p>
+          </div>
+          {/* Time remaining */}
+          <div className="text-right">
+            <p className="text-xs font-semibold text-upstox-muted uppercase tracking-wider mb-1">
+              Time Left
+            </p>
+            <p className="text-3xl font-black tabular-nums" style={{ color: timerColor }}>
+              {mins > 0 ? `${mins}:${String(secs).padStart(2, '0')}` : `${secs}s`}
+            </p>
+          </div>
+        </div>
+
+        {/* Progress bar */}
+        <div className="h-2 bg-upstox-navy rounded-full overflow-hidden">
+          <div
+            className="h-full rounded-full transition-all duration-1000"
+            style={{ width: `${pct}%`, background: timerColor }}
+          />
+        </div>
+
+        {/* Question dots */}
+        <div className="flex gap-1.5 mt-4 flex-wrap">
+          {Array.from({ length: totalQuestions }).map((_, i) => (
+            <div
+              key={i}
+              className="h-1.5 rounded-full flex-1 min-w-[8px] transition-all duration-300"
+              style={{
+                background:
+                  i < currentQIndex
+                    ? '#22C55E'
+                    : i === currentQIndex
+                    ? '#6C3EFF'
+                    : '#1A1A3E',
+              }}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Live leaderboard */}
+      {liveLeaderboard.length > 0 ? (
+        <LiveLeaderboard leaderboard={liveLeaderboard} title="Live Standings" />
+      ) : (
+        <div className="bg-upstox-card rounded-3xl p-8 text-center">
+          <p className="text-upstox-muted text-sm">
+            Leaderboard updates after each question…
+          </p>
+        </div>
+      )}
+
+      {/* End game */}
+      <button
+        onClick={onEndGame}
+        className="w-full py-4 rounded-2xl font-bold text-base text-red-400 border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 transition-all active:scale-95"
+      >
+        ⏹  End Game Now
+      </button>
+    </div>
+  );
+}
+
+// ── Live Leaderboard ──────────────────────────────────────────────────────────
+function LiveLeaderboard({ leaderboard, title }) {
+  const MEDALS = ['🥇', '🥈', '🥉'];
+  const maxScore = leaderboard[0]?.score || 1;
+
+  return (
+    <div className="bg-upstox-card rounded-3xl p-6">
+      <h3 className="text-sm font-semibold text-upstox-muted uppercase tracking-wider mb-4">
+        {title}
+      </h3>
+      <div className="space-y-2.5">
+        {leaderboard.map((p, i) => (
+          <div key={p.name} className="flex items-center gap-3 animate-fade-up">
+            <span className="w-7 text-center text-lg shrink-0">
+              {i < 3 ? MEDALS[i] : <span className="text-sm text-upstox-muted font-bold">#{i + 1}</span>}
+            </span>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-semibold text-sm truncate">{p.name}</span>
+                <span className="text-sm font-black text-upstox-purple-light ml-2 shrink-0">
+                  {p.score.toLocaleString()}
+                </span>
+              </div>
+              {/* Score bar */}
+              <div className="h-1 bg-upstox-navy rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-500"
+                  style={{
+                    width: `${(p.score / maxScore) * 100}%`,
+                    background: i === 0 ? '#FFD700' : i === 1 ? '#C0C0C0' : i === 2 ? '#CD7F32' : '#6C3EFF',
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Status Badge ──────────────────────────────────────────────────────────────
 function StatusBadge({ status }) {
   const map = {
     lobby: { label: 'Lobby', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
     starting: { label: 'Starting', color: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' },
-    'question-active': { label: 'Live', color: 'bg-green-500/20 text-green-400 border-green-500/30' },
-    'question-closed': { label: 'Closed', color: 'bg-orange-500/20 text-orange-400 border-orange-500/30' },
+    'game-running': { label: '🔴 Live', color: 'bg-green-500/20 text-green-400 border-green-500/30' },
     'all-done': { label: 'Finished', color: 'bg-purple-500/20 text-purple-400 border-purple-500/30' },
-    'leaderboard-shown': { label: 'Leaderboard', color: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' },
+    'leaderboard-shown': { label: 'Results', color: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' },
     'answers-revealed': { label: 'Revealed', color: 'bg-green-500/20 text-green-400 border-green-500/30' },
   };
   const { label, color } = map[status] ?? { label: status, color: 'bg-upstox-card text-upstox-muted border-upstox-muted/20' };
-  return (
-    <span className={`text-xs font-semibold px-3 py-1.5 rounded-full border ${color}`}>{label}</span>
-  );
-}
-
-function QuestionPreview({ question, answered, total }) {
-  const pct = total > 0 ? (answered / total) * 100 : 0;
-  return (
-    <div className="bg-upstox-card rounded-3xl p-6 space-y-4">
-      <div className="flex items-center justify-between text-sm">
-        <span className="text-upstox-muted font-semibold">
-          Question {question.index + 1} / {question.total}
-        </span>
-        <span className="text-upstox-muted font-semibold">{question.duration}s</span>
-      </div>
-
-      <p className="text-lg font-bold text-white leading-snug">{question.question}</p>
-
-      <div className="grid grid-cols-2 gap-2">
-        {['A', 'B', 'C', 'D'].map((key) => (
-          <div
-            key={key}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm"
-            style={{ background: `${OPTION_COLORS[key]}33` }}
-          >
-            <span
-              className="w-6 h-6 rounded-lg flex items-center justify-center text-xs font-black"
-              style={{ background: OPTION_COLORS[key] }}
-            >
-              {key}
-            </span>
-            <span className="text-white/80 truncate">{question.options[key]}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* Answer progress */}
-      <div>
-        <div className="flex justify-between text-sm mb-2">
-          <span className="text-upstox-muted">Responses</span>
-          <span className="font-bold text-white">
-            {answered} / {total}
-          </span>
-        </div>
-        <div className="h-2.5 bg-upstox-navy rounded-full overflow-hidden">
-          <div
-            className="h-full rounded-full transition-all duration-300"
-            style={{
-              width: `${pct}%`,
-              background: pct === 100 ? '#22C55E' : '#6C3EFF',
-            }}
-          />
-        </div>
-      </div>
-    </div>
-  );
+  return <span className={`text-xs font-semibold px-3 py-1.5 rounded-full border ${color}`}>{label}</span>;
 }

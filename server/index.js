@@ -27,31 +27,54 @@ function notifyAdmin(event, data) {
   }
 }
 
+function endGame() {
+  game.status = 'ended';
+  io.emit('game:ended', {});
+  notifyAdmin('admin:game-ended', { leaderboard: game.getLeaderboard() });
+}
+
+// Fully automatic — no manual admin intervention between questions
 function startNextQuestion() {
   const hasNext = game.advanceQuestion();
 
   if (!hasNext) {
-    // All questions exhausted
-    notifyAdmin('admin:game-ended', {});
+    endGame();
     return;
   }
 
   const payload = game.getCurrentQuestionPayload();
   io.emit('game:question', payload);
-  notifyAdmin('admin:question-started', {
-    ...payload,
-    ...game.getAnswerProgress(),
+
+  // Tell admin which question we're on (for progress display)
+  notifyAdmin('admin:question-tick', {
+    questionIndex: payload.index,
+    total: payload.total,
   });
 
   // Auto-close after duration
   game.timer = setTimeout(() => {
     game.closeQuestion();
     io.emit('game:question-closed', {});
-    notifyAdmin('admin:question-closed', {
-      ...game.getAnswerProgress(),
-      isLast: game.isLastQuestion(),
-    });
     game.timer = null;
+
+    // Push live leaderboard snapshot to admin after every question
+    notifyAdmin('admin:live-leaderboard', {
+      leaderboard: game.getLeaderboard(),
+    });
+
+    if (game.isLastQuestion()) {
+      // Short pause, then end
+      game.timer = setTimeout(() => {
+        game.timer = null;
+        endGame();
+      }, 2000);
+    } else {
+      // Pause between questions, then auto-advance
+      game.timer = setTimeout(() => {
+        game.timer = null;
+        startNextQuestion();
+      }, 3000);
+    }
   }, payload.duration * 1000);
 }
 
@@ -115,7 +138,7 @@ io.on('connection', (socket) => {
   socket.on('admin:start-game', async ({ duration } = {}) => {
     if (socket.id !== game.adminSocketId) return;
     const safeDuration = Math.min(Math.max(Number(duration) || 30, 5), 120);
-    // Load questions if not yet loaded
+
     if (game.questions.length === 0) {
       try {
         const questions = await fetchQuestions();
@@ -126,38 +149,41 @@ io.on('connection', (socket) => {
         return;
       }
     }
+
     const result = game.startGame(safeDuration);
     if (!result.success) {
       socket.emit('error', { message: result.error });
       return;
     }
+
     io.emit('game:started', {});
-    // Brief delay so players see "game starting" screen
+
+    // Total game duration = (questions × per-question time) + (gaps between questions)
+    const totalDuration =
+      game.questions.length * safeDuration + (game.questions.length - 1) * 3;
+
+    notifyAdmin('admin:game-info', {
+      totalDuration,
+      questionsCount: game.questions.length,
+      duration: safeDuration,
+    });
+
+    // Brief countdown before first question
     setTimeout(() => startNextQuestion(), 2000);
   });
 
-  socket.on('admin:close-question', () => {
-    if (socket.id !== game.adminSocketId) return;
-    if (game.status !== 'question-active') return;
-    if (game.timer) {
-      clearTimeout(game.timer);
-      game.timer = null;
-    }
-    game.closeQuestion();
-    io.emit('game:question-closed', {});
-    notifyAdmin('admin:question-closed', {
-      ...game.getAnswerProgress(),
-      isLast: game.isLastQuestion(),
-    });
-  });
-
-  socket.on('admin:next-question', () => {
+  // Admin can force-end the game at any time
+  socket.on('admin:end-game', () => {
     if (socket.id !== game.adminSocketId) return;
     if (game.timer) {
       clearTimeout(game.timer);
       game.timer = null;
     }
-    startNextQuestion();
+    if (game.status === 'question-active') {
+      game.closeQuestion();
+      io.emit('game:question-closed', {});
+    }
+    endGame();
   });
 
   socket.on('admin:show-leaderboard', () => {

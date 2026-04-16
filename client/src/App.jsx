@@ -40,6 +40,8 @@ function reducer(state, action) {
       return { ...state, myAnswer: action.answer, screen: 'waiting' };
     case 'LEADERBOARD':
       return { ...state, screen: 'leaderboard', leaderboard: action.leaderboard };
+    case 'GAME_OVER':
+      return { ...state, screen: 'game_over' };
     case 'ANSWERS_REVEALED':
       return { ...state, screen: 'reveal', answerReveal: action.questions };
     case 'RESET':
@@ -68,6 +70,7 @@ export default function App() {
     socket.on('game:question-closed', () => dispatch({ type: 'QUESTION_CLOSED' }));
     socket.on('player:answer-confirmed', ({ answer }) => dispatch({ type: 'ANSWER_CONFIRMED', answer }));
     socket.on('game:leaderboard', ({ leaderboard }) => dispatch({ type: 'LEADERBOARD', leaderboard }));
+    socket.on('game:ended', () => dispatch({ type: 'GAME_OVER' }));
     socket.on('game:answers-revealed', ({ questions }) => dispatch({ type: 'ANSWERS_REVEALED', questions }));
     socket.on('game:reset', () => dispatch({ type: 'RESET' }));
     socket.on('error', ({ message }) => {
@@ -83,6 +86,7 @@ export default function App() {
       socket.off('game:question-closed');
       socket.off('player:answer-confirmed');
       socket.off('game:leaderboard');
+      socket.off('game:ended');
       socket.off('game:answers-revealed');
       socket.off('game:reset');
       socket.off('error');
@@ -136,6 +140,7 @@ export default function App() {
       {screen === 'waiting' && (
         <WaitingPage myAnswer={myAnswer} isGameStarting={isGameStarting} />
       )}
+      {screen === 'game_over' && <WaitingPage isGameOver />}
       {screen === 'leaderboard' && (
         <LeaderboardPage leaderboard={leaderboard} playerName={playerName} />
       )}

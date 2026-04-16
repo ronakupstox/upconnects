@@ -1,6 +1,25 @@
 const OPTION_COLORS = { A: '#C0392B', B: '#1A56C4', C: '#B7770D', D: '#1A7A1A' };
 
-export default function WaitingPage({ myAnswer, isGameStarting }) {
+export default function WaitingPage({ myAnswer, isGameStarting, isGameOver }) {
+  if (isGameOver) {
+    return (
+      <div className="min-h-screen bg-upstox-dark flex flex-col items-center justify-center px-5 text-center">
+        <div className="text-7xl mb-6">🎉</div>
+        <h1 className="text-3xl font-black text-white mb-3">Game Over!</h1>
+        <p className="text-upstox-muted">The host is about to reveal the results…</p>
+        <div className="flex gap-1.5 justify-center mt-8">
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="w-2.5 h-2.5 rounded-full bg-upstox-purple animate-bounce"
+              style={{ animationDelay: `${i * 0.15}s` }}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   if (isGameStarting) {
     return (
       <div className="min-h-screen bg-upstox-dark flex flex-col items-center justify-center px-5 text-center">
