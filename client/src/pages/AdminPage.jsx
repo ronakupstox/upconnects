@@ -51,8 +51,13 @@ function reducer(state, action) {
   }
 }
 
-export default function AdminPage() {
-  const [state, dispatch] = useReducer(reducer, initialState);
+export default function AdminPage({ initData }) {
+  const [state, dispatch] = useReducer(reducer, {
+    ...initialState,
+    // Seed with the payload from admin:authenticated so we don't start empty
+    players: initData?.players ?? [],
+    questionsCount: initData?.questionsCount ?? 0,
+  });
   const [duration, setDuration] = useState(30);
 
   const showToast = useCallback((message) => {

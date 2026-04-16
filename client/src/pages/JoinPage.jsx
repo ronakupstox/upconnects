@@ -13,7 +13,7 @@ export default function JoinPage({ onJoin, error }) {
     if (mode === 'player' && !name.trim()) return;
     if (!code.trim()) return;
     setLoading(true);
-    onJoin(name.trim(), code.trim().toUpperCase());
+    onJoin(name.trim(), code.trim().toUpperCase(), mode);
     // Reset loading after a moment (server will respond with error or redirect)
     setTimeout(() => setLoading(false), 2000);
   };

@@ -18,6 +18,7 @@ const initialState = {
   isGameStarting: false,
   leaderboard: [],
   answerReveal: [],
+  adminInitData: null, // initial payload passed to AdminPage on auth
   error: '',
 };
 
@@ -26,7 +27,7 @@ function reducer(state, action) {
     case 'JOINED':
       return { ...state, screen: 'lobby', playerName: action.name, error: '' };
     case 'ADMIN_AUTH':
-      return { ...state, screen: 'admin', error: '' };
+      return { ...state, screen: 'admin', adminInitData: action.data, error: '' };
     case 'PLAYERS_UPDATE':
       return { ...state, players: action.players };
     case 'GAME_STARTED':
@@ -89,19 +90,17 @@ export default function App() {
     };
   }, [clearError]);
 
-  const handleJoin = useCallback((name, code) => {
-    // Try admin first — server validates; if it fails, error is shown
-    // Determine which join to attempt by trying admin code
-    socket.once('admin:authenticated', () => dispatch({ type: 'ADMIN_AUTH' }));
-    socket.emit('admin:join', { adminCode: code });
-
-    // If server doesn't authenticate as admin within 300ms, try as player
-    const fallback = setTimeout(() => {
-      socket.off('admin:authenticated');
+  const handleJoin = useCallback((name, code, mode) => {
+    if (mode === 'host') {
+      // Admin path — wait for server to confirm, then pass initial state to AdminPage
+      socket.once('admin:authenticated', (data) => {
+        dispatch({ type: 'ADMIN_AUTH', data });
+      });
+      socket.emit('admin:join', { adminCode: code });
+    } else {
+      // Player path — straightforward, no admin guessing
       socket.emit('player:join', { gameCode: code, name });
-    }, 300);
-
-    socket.once('admin:authenticated', () => clearTimeout(fallback));
+    }
   }, []);
 
   const handleAnswer = useCallback(
@@ -114,7 +113,7 @@ export default function App() {
 
   const { screen, playerName, players, currentQuestion, myAnswer, questionClosed, isGameStarting, leaderboard, answerReveal, error } = state;
 
-  if (screen === 'admin') return <AdminPage />;
+  if (screen === 'admin') return <AdminPage initData={state.adminInitData} />;
 
   return (
     <div className="min-h-screen bg-upstox-dark text-white">
