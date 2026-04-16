@@ -114,7 +114,7 @@ class GameManager {
     this.answeredPlayers.add(socketId);
 
     if (this.questions[qi]?.correctAnswer === answer) {
-      player.score += 1000;
+      player.score += 10;
     }
 
     return {

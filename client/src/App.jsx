@@ -12,13 +12,14 @@ const initialState = {
   screen: 'join',    // join | lobby | question | waiting | leaderboard | reveal | admin
   playerName: '',
   players: [],
+  questionCount: 0,  // broadcast by server when admin loads questions
   currentQuestion: null,
   myAnswer: null,
   questionClosed: false,
   isGameStarting: false,
   leaderboard: [],
   answerReveal: [],
-  adminInitData: null, // initial payload passed to AdminPage on auth
+  adminInitData: null,
   error: '',
 };
 
@@ -30,8 +31,10 @@ function reducer(state, action) {
       return { ...state, screen: 'admin', adminInitData: action.data, error: '' };
     case 'PLAYERS_UPDATE':
       return { ...state, players: action.players };
+    case 'QUESTION_COUNT':
+      return { ...state, questionCount: action.count };
     case 'GAME_STARTED':
-      return { ...state, screen: 'waiting', isGameStarting: true };
+      return { ...state, screen: 'waiting', isGameStarting: true, questionCount: action.questionCount ?? state.questionCount };
     case 'QUESTION':
       return { ...state, screen: 'question', currentQuestion: action.data, myAnswer: null, questionClosed: false, isGameStarting: false };
     case 'QUESTION_CLOSED':
@@ -65,7 +68,8 @@ export default function App() {
 
     socket.on('player:joined', ({ name }) => dispatch({ type: 'JOINED', name }));
     socket.on('game:player-joined', ({ players }) => dispatch({ type: 'PLAYERS_UPDATE', players }));
-    socket.on('game:started', () => dispatch({ type: 'GAME_STARTED' }));
+    socket.on('game:questions-count', ({ count }) => dispatch({ type: 'QUESTION_COUNT', count }));
+    socket.on('game:started', ({ questionCount } = {}) => dispatch({ type: 'GAME_STARTED', questionCount }));
     socket.on('game:question', (data) => dispatch({ type: 'QUESTION', data }));
     socket.on('game:question-closed', () => dispatch({ type: 'QUESTION_CLOSED' }));
     socket.on('player:answer-confirmed', ({ answer }) => dispatch({ type: 'ANSWER_CONFIRMED', answer }));
@@ -81,6 +85,7 @@ export default function App() {
     return () => {
       socket.off('player:joined');
       socket.off('game:player-joined');
+      socket.off('game:questions-count');
       socket.off('game:started');
       socket.off('game:question');
       socket.off('game:question-closed');
@@ -115,7 +120,7 @@ export default function App() {
     [state.myAnswer, state.questionClosed]
   );
 
-  const { screen, playerName, players, currentQuestion, myAnswer, questionClosed, isGameStarting, leaderboard, answerReveal, error } = state;
+  const { screen, playerName, players, questionCount, currentQuestion, myAnswer, questionClosed, isGameStarting, leaderboard, answerReveal, error } = state;
 
   if (screen === 'admin') return <AdminPage initData={state.adminInitData} />;
 
@@ -128,7 +133,7 @@ export default function App() {
       )}
 
       {screen === 'join' && <JoinPage onJoin={handleJoin} error={error} />}
-      {screen === 'lobby' && <PlayerLobby playerName={playerName} players={players} />}
+      {screen === 'lobby' && <PlayerLobby playerName={playerName} players={players} questionCount={questionCount} />}
       {screen === 'question' && currentQuestion && (
         <QuestionPage
           question={currentQuestion}

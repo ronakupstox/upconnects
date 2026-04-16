@@ -75,7 +75,7 @@ export default function AdminPage({ initData }) {
     players: initData?.players ?? [],
     questionsCount: initData?.questionsCount ?? 0,
   });
-  const [duration, setDuration] = useState(30);
+  const [totalMinutes, setTotalMinutes] = useState(5);
 
   const showToast = useCallback((msg) => {
     dispatch({ type: 'TOAST', message: msg });
@@ -210,39 +210,45 @@ export default function AdminPage({ initData }) {
 
             {/* Duration */}
             <div className="bg-upstox-card rounded-3xl p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-bold">Time per Question</h2>
-                <span className="text-3xl font-black text-upstox-purple">{duration}s</span>
+              <div className="flex items-center justify-between mb-1">
+                <h2 className="text-lg font-bold">Game Duration</h2>
+                <span className="text-3xl font-black text-upstox-purple">{totalMinutes} min</span>
               </div>
+              {/* Per-question breakdown */}
+              <p className="text-xs text-upstox-muted mb-4">
+                {questionsCount > 0
+                  ? `${Math.max(5, Math.floor((totalMinutes * 60) / questionsCount))}s per question with ${questionsCount} questions`
+                  : 'Load questions to see per-question time'}
+              </p>
               <input
-                type="range" min={10} max={120} step={5} value={duration}
-                onChange={(e) => setDuration(Number(e.target.value))}
+                type="range" min={1} max={30} step={1} value={totalMinutes}
+                onChange={(e) => setTotalMinutes(Number(e.target.value))}
                 className="w-full h-2 rounded-full appearance-none cursor-pointer"
                 style={{ accentColor: '#6C3EFF' }}
               />
               <div className="flex justify-between items-center text-xs text-upstox-muted mt-3">
-                <span>10s</span>
+                <span>1 min</span>
                 <div className="flex gap-2">
-                  {[15, 20, 30, 45, 60].map((s) => (
+                  {[3, 5, 10, 15, 20].map((m) => (
                     <button
-                      key={s}
-                      onClick={() => setDuration(s)}
+                      key={m}
+                      onClick={() => setTotalMinutes(m)}
                       className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
-                        duration === s ? 'bg-upstox-purple text-white' : 'bg-upstox-navy text-upstox-muted hover:text-white'
+                        totalMinutes === m ? 'bg-upstox-purple text-white' : 'bg-upstox-navy text-upstox-muted hover:text-white'
                       }`}
                     >
-                      {s}s
+                      {m}m
                     </button>
                   ))}
                 </div>
-                <span>120s</span>
+                <span>30 min</span>
               </div>
             </div>
 
             <button
               onClick={() => {
                 dispatch({ type: 'SET_LOADING', value: true });
-                emit('admin:start-game', { duration });
+                emit('admin:start-game', { totalGameDuration: totalMinutes * 60 });
                 setTimeout(() => dispatch({ type: 'SET_LOADING', value: false }), 3000);
               }}
               disabled={loading || status === 'starting'}

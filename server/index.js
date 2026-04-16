@@ -129,20 +129,24 @@ io.on('connection', (socket) => {
       const questions = await fetchQuestions();
       game.loadQuestions(questions);
       socket.emit('admin:questions-loaded', { count: questions.length });
+      // Let players in lobby know how many questions to expect
+      io.emit('game:questions-count', { count: questions.length });
     } catch (err) {
       console.error('Notion fetch error:', err);
       socket.emit('error', { message: 'Failed to load questions from Notion' });
     }
   });
 
-  socket.on('admin:start-game', async ({ duration } = {}) => {
+  socket.on('admin:start-game', async ({ totalGameDuration } = {}) => {
     if (socket.id !== game.adminSocketId) return;
-    const safeDuration = Math.min(Math.max(Number(duration) || 30, 5), 120);
+    // totalGameDuration is in seconds; clamp between 30s and 2 hours
+    const safeTotalSeconds = Math.min(Math.max(Number(totalGameDuration) || 300, 30), 7200);
 
     if (game.questions.length === 0) {
       try {
         const questions = await fetchQuestions();
         game.loadQuestions(questions);
+        io.emit('game:questions-count', { count: questions.length });
       } catch (err) {
         console.error('Notion fetch error:', err);
         socket.emit('error', { message: 'Failed to load questions from Notion' });
@@ -150,22 +154,22 @@ io.on('connection', (socket) => {
       }
     }
 
-    const result = game.startGame(safeDuration);
+    // Divide total game time equally across all questions (min 5s each)
+    const perQDuration = Math.max(5, Math.floor(safeTotalSeconds / game.questions.length));
+    const result = game.startGame(perQDuration);
     if (!result.success) {
       socket.emit('error', { message: result.error });
       return;
     }
 
-    io.emit('game:started', {});
+    const actualTotal = game.questions.length * perQDuration + (game.questions.length - 1) * 3;
 
-    // Total game duration = (questions × per-question time) + (gaps between questions)
-    const totalDuration =
-      game.questions.length * safeDuration + (game.questions.length - 1) * 3;
+    io.emit('game:started', { questionCount: game.questions.length });
 
     notifyAdmin('admin:game-info', {
-      totalDuration,
+      totalDuration: actualTotal,
       questionsCount: game.questions.length,
-      duration: safeDuration,
+      perQDuration,
     });
 
     // Brief countdown before first question
