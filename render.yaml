@@ -4,7 +4,7 @@ services:
   - type: web
     name: upconnects
     runtime: node
-    buildCommand: npm run build        # builds client/dist, then server starts
+    buildCommand: cd server && npm ci && cd ../client && npm ci && npm run build
     startCommand: npm start            # node server/index.js
     envVars:
       - key: NODE_ENV

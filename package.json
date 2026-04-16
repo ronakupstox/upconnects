@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "UpConnects real-time multiplayer quiz for Upstox",
   "scripts": {
-    "build": "cd client && npm ci && npm run build",
+    "build": "cd server && npm ci && cd ../client && npm ci && npm run build",
     "start": "node server/index.js",
     "dev:server": "cd server && npm run dev",
     "dev:client": "cd client && npm run dev",
