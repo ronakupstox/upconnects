@@ -12,7 +12,6 @@ class GameManager {
     this.players = new Map(); // socketId -> { name, score, answers: { [qIndex]: answer } }
     this.answeredPlayers = new Set();
     this.timer = null;
-    this.duration = 30; // game-level duration in seconds, set by admin before start
   }
 
   reset() {
@@ -54,14 +53,13 @@ class GameManager {
     return Array.from(this.players.values()).map((p) => ({ name: p.name }));
   }
 
-  startGame(duration) {
+  startGame() {
     if (this.questions.length === 0) {
       return { success: false, error: 'No questions loaded from Notion' };
     }
     if (this.players.size === 0) {
       return { success: false, error: 'No players have joined yet' };
     }
-    this.duration = duration;
     this.status = 'starting';
     this.currentQuestionIndex = -1;
     for (const [, player] of this.players) {
@@ -90,7 +88,6 @@ class GameManager {
       total: this.questions.length,
       question: q.question,
       options: q.options,
-      duration: this.duration,
     };
   }
 

@@ -15,6 +15,11 @@ const io = new Server(httpServer, {
 
 const game = new GameManager();
 
+// Module-level overall game timer (fires when total game time expires)
+let overallTimer = null;
+// Auto-advance timer (fires 2s after all players answer a question)
+let autoAdvanceTimer = null;
+
 // ── Static files from React build ──────────────────────────────────────────
 const clientDist = path.join(__dirname, '..', 'client', 'dist');
 app.use(express.static(clientDist));
@@ -27,16 +32,24 @@ function notifyAdmin(event, data) {
   }
 }
 
+function clearAllTimers() {
+  if (overallTimer) { clearTimeout(overallTimer); overallTimer = null; }
+  if (autoAdvanceTimer) { clearTimeout(autoAdvanceTimer); autoAdvanceTimer = null; }
+  if (game.timer) { clearTimeout(game.timer); game.timer = null; }
+}
+
 function endGame() {
+  clearAllTimers();
   game.status = 'ended';
   io.emit('game:ended', {});
   notifyAdmin('admin:game-ended', { leaderboard: game.getLeaderboard() });
 }
 
-// Fully automatic — no manual admin intervention between questions
 function startNextQuestion() {
-  const hasNext = game.advanceQuestion();
+  // Cancel any pending auto-advance
+  if (autoAdvanceTimer) { clearTimeout(autoAdvanceTimer); autoAdvanceTimer = null; }
 
+  const hasNext = game.advanceQuestion();
   if (!hasNext) {
     endGame();
     return;
@@ -45,37 +58,17 @@ function startNextQuestion() {
   const payload = game.getCurrentQuestionPayload();
   io.emit('game:question', payload);
 
-  // Tell admin which question we're on (for progress display)
+  // Tell admin which question we're on
   notifyAdmin('admin:question-tick', {
     questionIndex: payload.index,
     total: payload.total,
   });
 
-  // Auto-close after duration
-  game.timer = setTimeout(() => {
-    game.closeQuestion();
-    io.emit('game:question-closed', {});
-    game.timer = null;
-
-    // Push live leaderboard snapshot to admin after every question
-    notifyAdmin('admin:live-leaderboard', {
-      leaderboard: game.getLeaderboard(),
-    });
-
-    if (game.isLastQuestion()) {
-      // Short pause, then end
-      game.timer = setTimeout(() => {
-        game.timer = null;
-        endGame();
-      }, 2000);
-    } else {
-      // Pause between questions, then auto-advance
-      game.timer = setTimeout(() => {
-        game.timer = null;
-        startNextQuestion();
-      }, 3000);
-    }
-  }, payload.duration * 1000);
+  // Reset answer progress for this question
+  notifyAdmin('admin:answer-progress', {
+    answered: 0,
+    total: game.players.size,
+  });
 }
 
 // ── Socket.io ────────────────────────────────────────────────────────────────
@@ -107,6 +100,25 @@ io.on('connection', (socket) => {
       answered: result.answered,
       total: result.total,
     });
+
+    // All players answered → close question, update leaderboard, auto-advance in 2s
+    if (result.answered >= result.total) {
+      game.closeQuestion();
+      io.emit('game:question-closed', {});
+
+      notifyAdmin('admin:live-leaderboard', {
+        leaderboard: game.getLeaderboard(),
+      });
+
+      autoAdvanceTimer = setTimeout(() => {
+        autoAdvanceTimer = null;
+        if (game.isLastQuestion()) {
+          endGame();
+        } else {
+          startNextQuestion();
+        }
+      }, 2000);
+    }
   });
 
   // ── ADMIN ─────────────────────────────────────────────────────────────────
@@ -129,7 +141,6 @@ io.on('connection', (socket) => {
       const questions = await fetchQuestions();
       game.loadQuestions(questions);
       socket.emit('admin:questions-loaded', { count: questions.length });
-      // Let players in lobby know how many questions to expect
       io.emit('game:questions-count', { count: questions.length });
     } catch (err) {
       console.error('Notion fetch error:', err);
@@ -154,35 +165,55 @@ io.on('connection', (socket) => {
       }
     }
 
-    // Divide total game time equally across all questions (min 5s each)
-    const perQDuration = Math.max(5, Math.floor(safeTotalSeconds / game.questions.length));
-    const result = game.startGame(perQDuration);
+    const result = game.startGame();
     if (!result.success) {
       socket.emit('error', { message: result.error });
       return;
     }
 
-    const actualTotal = game.questions.length * perQDuration + (game.questions.length - 1) * 3;
-
     io.emit('game:started', { questionCount: game.questions.length });
 
     notifyAdmin('admin:game-info', {
-      totalDuration: actualTotal,
+      totalDuration: safeTotalSeconds,
       questionsCount: game.questions.length,
-      perQDuration,
+      totalPlayers: game.players.size,
     });
+
+    // Start overall game timer — when it fires, end the game regardless of progress
+    overallTimer = setTimeout(() => {
+      overallTimer = null;
+      endGame();
+    }, safeTotalSeconds * 1000);
 
     // Brief countdown before first question
     setTimeout(() => startNextQuestion(), 2000);
   });
 
+  // Admin can manually advance to the next question (e.g., if a slow player hasn't answered)
+  socket.on('admin:next-question', () => {
+    if (socket.id !== game.adminSocketId) return;
+    if (game.status !== 'question-active' && game.status !== 'question-closed') return;
+
+    // Cancel any pending auto-advance
+    if (autoAdvanceTimer) { clearTimeout(autoAdvanceTimer); autoAdvanceTimer = null; }
+
+    // Close current question if still active
+    if (game.status === 'question-active') {
+      game.closeQuestion();
+      io.emit('game:question-closed', {});
+      notifyAdmin('admin:live-leaderboard', { leaderboard: game.getLeaderboard() });
+    }
+
+    if (game.isLastQuestion()) {
+      endGame();
+    } else {
+      startNextQuestion();
+    }
+  });
+
   // Admin can force-end the game at any time
   socket.on('admin:end-game', () => {
     if (socket.id !== game.adminSocketId) return;
-    if (game.timer) {
-      clearTimeout(game.timer);
-      game.timer = null;
-    }
     if (game.status === 'question-active') {
       game.closeQuestion();
       io.emit('game:question-closed', {});
@@ -202,6 +233,7 @@ io.on('connection', (socket) => {
 
   socket.on('admin:reset-game', () => {
     if (socket.id !== game.adminSocketId) return;
+    clearAllTimers();
     game.reset();
     io.emit('game:reset', {});
     socket.emit('admin:authenticated', {

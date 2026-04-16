@@ -12,6 +12,8 @@ const initialState = {
   currentQIndex: 0,
   totalQuestions: 0,
   liveLeaderboard: [],
+  answeredCount: 0,
+  totalPlayers: 0,
   // misc
   toast: null,
   loading: false,
@@ -40,9 +42,13 @@ function reducer(state, action) {
         totalQuestions: action.questionsCount,
         currentQIndex: 0,
         liveLeaderboard: [],
+        answeredCount: 0,
+        totalPlayers: action.totalPlayers ?? 0,
       };
     case 'QUESTION_TICK':
-      return { ...state, currentQIndex: action.questionIndex };
+      return { ...state, currentQIndex: action.questionIndex, answeredCount: 0 };
+    case 'ANSWER_PROGRESS':
+      return { ...state, answeredCount: action.answered, totalPlayers: action.total };
     case 'LIVE_LEADERBOARD':
       return { ...state, liveLeaderboard: action.leaderboard };
     case 'GAME_ENDED':
@@ -94,11 +100,14 @@ export default function AdminPage({ initData }) {
       dispatch({ type: 'SET_LOADING', value: false });
     });
     socket.on('game:started', () => dispatch({ type: 'GAME_STARTED' }));
-    socket.on('admin:game-info', ({ totalDuration, questionsCount }) =>
-      dispatch({ type: 'GAME_INFO', totalDuration, questionsCount })
+    socket.on('admin:game-info', ({ totalDuration, questionsCount, totalPlayers }) =>
+      dispatch({ type: 'GAME_INFO', totalDuration, questionsCount, totalPlayers })
     );
     socket.on('admin:question-tick', ({ questionIndex }) =>
       dispatch({ type: 'QUESTION_TICK', questionIndex })
+    );
+    socket.on('admin:answer-progress', ({ answered, total }) =>
+      dispatch({ type: 'ANSWER_PROGRESS', answered, total })
     );
     socket.on('admin:live-leaderboard', ({ leaderboard }) =>
       dispatch({ type: 'LIVE_LEADERBOARD', leaderboard })
@@ -118,7 +127,7 @@ export default function AdminPage({ initData }) {
       [
         'admin:authenticated', 'admin:player-update', 'admin:questions-loaded',
         'game:started', 'admin:game-info', 'admin:question-tick',
-        'admin:live-leaderboard', 'admin:game-ended',
+        'admin:answer-progress', 'admin:live-leaderboard', 'admin:game-ended',
         'game:leaderboard', 'game:answers-revealed', 'game:reset', 'error',
       ].forEach((e) => socket.off(e));
     };
@@ -134,7 +143,7 @@ export default function AdminPage({ initData }) {
 
   const {
     status, players, questionsCount, totalDuration, currentQIndex,
-    totalQuestions, liveLeaderboard, toast, loading,
+    totalQuestions, liveLeaderboard, answeredCount, totalPlayers, toast, loading,
   } = state;
 
   return (
@@ -267,6 +276,9 @@ export default function AdminPage({ initData }) {
             currentQIndex={currentQIndex}
             totalQuestions={totalQuestions}
             liveLeaderboard={liveLeaderboard}
+            answeredCount={answeredCount}
+            totalPlayers={totalPlayers}
+            onNextQuestion={() => emit('admin:next-question')}
             onEndGame={() => {
               if (window.confirm('End the game now? Current scores will be final.')) {
                 emit('admin:end-game');
@@ -339,7 +351,7 @@ export default function AdminPage({ initData }) {
 }
 
 // ── Game Running View ─────────────────────────────────────────────────────────
-function GameRunningView({ totalDuration, currentQIndex, totalQuestions, liveLeaderboard, onEndGame }) {
+function GameRunningView({ totalDuration, currentQIndex, totalQuestions, liveLeaderboard, answeredCount, totalPlayers, onNextQuestion, onEndGame }) {
   const [secondsLeft, setSecondsLeft] = useState(totalDuration);
   const intervalRef = useRef(null);
 
@@ -409,6 +421,37 @@ function GameRunningView({ totalDuration, currentQIndex, totalQuestions, liveLea
             />
           ))}
         </div>
+      </div>
+
+      {/* Answer progress + Next Question */}
+      <div className="bg-upstox-card rounded-3xl p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <p className="text-xs font-semibold text-upstox-muted uppercase tracking-wider mb-0.5">Answered</p>
+            <p className="text-2xl font-black tabular-nums">
+              {answeredCount}
+              <span className="text-upstox-muted font-normal text-base"> / {totalPlayers}</span>
+            </p>
+          </div>
+          <button
+            onClick={onNextQuestion}
+            className="px-5 py-3 rounded-2xl font-bold text-sm text-white transition-all active:scale-95 shadow-md"
+            style={{ background: 'linear-gradient(135deg, #6C3EFF 0%, #4B1FCC 100%)' }}
+          >
+            Next Question →
+          </button>
+        </div>
+        {totalPlayers > 0 && (
+          <div className="h-1.5 bg-upstox-navy rounded-full overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{
+                width: `${(answeredCount / totalPlayers) * 100}%`,
+                background: answeredCount === totalPlayers ? '#22C55E' : '#6C3EFF',
+              }}
+            />
+          </div>
+        )}
       </div>
 
       {/* Live leaderboard */}

@@ -1,7 +1,5 @@
-import Timer from '../components/Timer';
-
 export default function QuestionPage({ question, onAnswer, myAnswer, questionClosed }) {
-  const { index, total, question: text, options, duration } = question;
+  const { index, total, question: text, options } = question;
   const answered = !!myAnswer || questionClosed;
 
   return (
@@ -23,7 +21,6 @@ export default function QuestionPage({ question, onAnswer, myAnswer, questionClo
             Question {index + 1}
             <span className="text-upstox-muted font-normal"> / {total}</span>
           </span>
-          <Timer key={`${index}-${duration}`} duration={duration} />
         </div>
 
         {/* ── Dot progress row ─────────────────────────────────────────── */}

@@ -34,18 +34,25 @@ function reducer(state, action) {
     case 'QUESTION_COUNT':
       return { ...state, questionCount: action.count };
     case 'GAME_STARTED':
+      if (state.screen === 'admin') return state;
       return { ...state, screen: 'waiting', isGameStarting: true, questionCount: action.questionCount ?? state.questionCount };
     case 'QUESTION':
+      if (state.screen === 'admin') return state;
       return { ...state, screen: 'question', currentQuestion: action.data, myAnswer: null, questionClosed: false, isGameStarting: false };
     case 'QUESTION_CLOSED':
+      if (state.screen === 'admin') return state;
       return { ...state, questionClosed: true, screen: 'waiting', isGameStarting: false };
     case 'ANSWER_CONFIRMED':
+      if (state.screen === 'admin') return state;
       return { ...state, myAnswer: action.answer, screen: 'waiting' };
     case 'LEADERBOARD':
+      if (state.screen === 'admin') return state;
       return { ...state, screen: 'leaderboard', leaderboard: action.leaderboard };
     case 'GAME_OVER':
+      if (state.screen === 'admin') return state;
       return { ...state, screen: 'game_over' };
     case 'ANSWERS_REVEALED':
+      if (state.screen === 'admin') return state;
       return { ...state, screen: 'reveal', answerReveal: action.questions };
     case 'RESET':
       return { ...initialState };
