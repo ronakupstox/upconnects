@@ -16,7 +16,7 @@ export default {
         },
       },
       fontFamily: {
-        sans: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', 'sans-serif'],
+        sans: ['"Inter"', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
       },
       animation: {
         'pop-in': 'popIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
